@@ -19,14 +19,16 @@ def _assess_data_freshness(report: schema.Report) -> dict:
     reddit_recent = sum(1 for r in report.reddit if r.date and r.date >= report.range_from)
     x_recent = sum(1 for x in report.x if x.date and x.date >= report.range_from)
     web_recent = sum(1 for w in report.web if w.date and w.date >= report.range_from)
+    raindrops_recent = sum(1 for rd in report.raindrops if rd.created and rd.created >= report.range_from)
 
-    total_recent = reddit_recent + x_recent + web_recent
-    total_items = len(report.reddit) + len(report.x) + len(report.web)
+    total_recent = reddit_recent + x_recent + web_recent + raindrops_recent
+    total_items = len(report.reddit) + len(report.x) + len(report.web) + len(report.raindrops)
 
     return {
         "reddit_recent": reddit_recent,
         "x_recent": x_recent,
         "web_recent": web_recent,
+        "raindrops_recent": raindrops_recent,
         "total_recent": total_recent,
         "total_items": total_items,
         "is_sparse": total_recent < 5,
@@ -190,6 +192,38 @@ def render_compact(report: schema.Report, limit: int = 15, missing_keys: str = "
             lines.append(f"  *{item.why_relevant}*")
             lines.append("")
 
+    # Raindrop items (personal/public bookmarks)
+    if report.raindrops_error:
+        lines.append("### Raindrop Bookmarks")
+        lines.append("")
+        lines.append(f"**ERROR:** {report.raindrops_error}")
+        lines.append("")
+    elif report.mode in ("all", "raindrops-only", "raindrops-web") and not report.raindrops:
+        lines.append("### Raindrop Bookmarks")
+        lines.append("")
+        lines.append("*No relevant bookmarks found for this topic.*")
+        lines.append("")
+    elif report.raindrops:
+        lines.append("### Raindrop Bookmarks")
+        lines.append("")
+        for item in report.raindrops[:limit]:
+            date_str = f" ({item.created})" if item.created else " (date unknown)"
+            fav_str = " ❤️" if item.important else ""
+            tags_str = f" [tags: {', '.join(item.tags[:3])}]" if item.tags else ""
+            type_str = f" [{item.type}]" if item.type != "link" else ""
+
+            lines.append(f"**{item.id}** [RAINDROP] (score:{item.score}) {item.domain}{date_str}{fav_str}{type_str}")
+            lines.append(f"  {item.title}")
+            lines.append(f"  {item.link}")
+            if item.note:
+                lines.append(f"  📝 Note: {item.note[:100]}...")
+            if item.excerpt:
+                lines.append(f"  {item.excerpt[:150]}...")
+            lines.append(f"  *{item.why_relevant}*")
+            if tags_str:
+                lines.append(f"  {tags_str}")
+            lines.append("")
+
     return "\n".join(lines)
 
 
@@ -219,6 +253,8 @@ def render_context_snippet(report: schema.Report) -> str:
         all_items.append((item.score, "X", item.text[:50] + "...", item.url))
     for item in report.web[:5]:
         all_items.append((item.score, "Web", item.title[:50] + "...", item.url))
+    for item in report.raindrops[:5]:
+        all_items.append((item.score, "Raindrop", item.title[:50] + "...", item.link))
 
     all_items.sort(key=lambda x: -x[0])
     for score, source, text, url in all_items[:7]:

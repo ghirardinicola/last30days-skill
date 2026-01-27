@@ -19,6 +19,12 @@ WEBSEARCH_SOURCE_PENALTY = 15  # Points deducted for lacking engagement
 WEBSEARCH_VERIFIED_BONUS = 10   # Bonus for URL-verified recent date (high confidence)
 WEBSEARCH_NO_DATE_PENALTY = 20  # Heavy penalty for no date signals (low confidence)
 
+# Raindrops weights (no traditional engagement, uses importance flag)
+RAINDROPS_WEIGHT_RELEVANCE = 0.60
+RAINDROPS_WEIGHT_RECENCY = 0.30
+RAINDROPS_WEIGHT_IMPORTANCE = 0.10
+RAINDROPS_SOURCE_PENALTY = 10  # Slight penalty vs Reddit/X (curated but no organic engagement)
+
 # Default engagement score for unknown
 DEFAULT_ENGAGEMENT = 35
 UNKNOWN_ENGAGEMENT_PENALTY = 10
@@ -278,7 +284,54 @@ def score_websearch_items(items: List[schema.WebSearchItem]) -> List[schema.WebS
     return items
 
 
-def sort_items(items: List[Union[schema.RedditItem, schema.XItem, schema.WebSearchItem]]) -> List:
+def score_raindrop_items(items: List[schema.RaindropItem]) -> List[schema.RaindropItem]:
+    """Compute scores for Raindrop items WITHOUT traditional engagement metrics.
+
+    Uses formula: 60% relevance + 30% recency + 10% importance - 10pt penalty.
+    Importance is binary (favorite = 100, not favorite = 0).
+
+    Args:
+        items: List of Raindrop items
+
+    Returns:
+        Items with updated scores
+    """
+    if not items:
+        return items
+
+    for item in items:
+        # Relevance subscore (model-provided, convert to 0-100)
+        rel_score = int(item.relevance * 100)
+
+        # Recency subscore (based on created date)
+        rec_score = dates.recency_score(item.created)
+
+        # Importance subscore (binary: favorite or not)
+        imp_score = 100 if item.important else 0
+
+        # Store subscores (use engagement field for importance)
+        item.subs = schema.SubScores(
+            relevance=rel_score,
+            recency=rec_score,
+            engagement=imp_score,  # Reuse engagement field for importance indicator
+        )
+
+        # Compute overall score using Raindrops weights
+        overall = (
+            RAINDROPS_WEIGHT_RELEVANCE * rel_score +
+            RAINDROPS_WEIGHT_RECENCY * rec_score +
+            RAINDROPS_WEIGHT_IMPORTANCE * imp_score
+        )
+
+        # Apply source penalty (Raindrops < Reddit/X, but > WebSearch)
+        overall -= RAINDROPS_SOURCE_PENALTY
+
+        item.score = max(0, min(100, int(overall)))
+
+    return items
+
+
+def sort_items(items: List[Union[schema.RedditItem, schema.XItem, schema.WebSearchItem, schema.RaindropItem]]) -> List:
     """Sort items by score (descending), then date, then source priority.
 
     Args:
@@ -292,16 +345,19 @@ def sort_items(items: List[Union[schema.RedditItem, schema.XItem, schema.WebSear
         score = -item.score
 
         # Secondary: date descending (recent first)
-        date = item.date or "0000-00-00"
+        # Handle different date field names
+        date = getattr(item, "date", None) or getattr(item, "created", None) or "0000-00-00"
         date_key = -int(date.replace("-", ""))
 
-        # Tertiary: source priority (Reddit > X > WebSearch)
+        # Tertiary: source priority (Reddit > X > Raindrops > WebSearch)
         if isinstance(item, schema.RedditItem):
             source_priority = 0
         elif isinstance(item, schema.XItem):
             source_priority = 1
-        else:  # WebSearchItem
+        elif isinstance(item, schema.RaindropItem):
             source_priority = 2
+        else:  # WebSearchItem
+            source_priority = 3
 
         # Quaternary: title/text for stability
         text = getattr(item, "title", "") or getattr(item, "text", "")

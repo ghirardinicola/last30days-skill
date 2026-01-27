@@ -34,6 +34,7 @@ from lib import (
     models,
     normalize,
     openai_reddit,
+    raindrops_search,
     reddit_enrich,
     render,
     schema,
@@ -158,6 +159,48 @@ def _search_x(
     return x_items, raw_xai, x_error
 
 
+def _search_raindrops(
+    topic: str,
+    config: dict,
+    from_date: str,
+    to_date: str,
+    depth: str,
+    mock: bool,
+) -> tuple:
+    """Search Raindrop.io bookmarks (runs in thread).
+
+    Returns:
+        Tuple of (raindrop_items, raw_raindrops, error)
+    """
+    raw_raindrops = None
+    raindrops_error = None
+
+    if mock:
+        raw_raindrops = load_fixture("raindrops_sample.json")
+    else:
+        try:
+            collection_id = config.get("RAINDROP_COLLECTION_ID", "0")
+            raw_raindrops = raindrops_search.search_raindrops(
+                config["RAINDROP_API_KEY"],
+                topic,
+                from_date,
+                to_date,
+                collection_id=collection_id,
+                depth=depth,
+            )
+        except http.HTTPError as e:
+            raw_raindrops = {"error": str(e)}
+            raindrops_error = f"API error: {e}"
+        except Exception as e:
+            raw_raindrops = {"error": str(e)}
+            raindrops_error = f"{type(e).__name__}: {e}"
+
+    # Parse response
+    raindrop_items = raindrops_search.parse_raindrops_response(raw_raindrops or {})
+
+    return raindrop_items, raw_raindrops, raindrops_error
+
+
 def run_research(
     topic: str,
     sources: str,
@@ -172,39 +215,44 @@ def run_research(
     """Run the research pipeline.
 
     Returns:
-        Tuple of (reddit_items, x_items, web_needed, raw_openai, raw_xai, raw_reddit_enriched, reddit_error, x_error)
+        Tuple of (reddit_items, x_items, raindrop_items, web_needed, raw_openai, raw_xai, raw_raindrops, raw_reddit_enriched, reddit_error, x_error, raindrops_error)
 
     Note: web_needed is True when WebSearch should be performed by Claude.
     The script outputs a marker and Claude handles WebSearch in its session.
     """
     reddit_items = []
     x_items = []
+    raindrop_items = []
     raw_openai = None
     raw_xai = None
+    raw_raindrops = None
     raw_reddit_enriched = []
     reddit_error = None
     x_error = None
+    raindrops_error = None
 
     # Check if WebSearch is needed (always needed in web-only mode)
-    web_needed = sources in ("all", "web", "reddit-web", "x-web")
+    web_needed = sources in ("all", "web", "reddit-web", "x-web", "raindrops-web")
 
     # Web-only mode: no API calls needed, Claude handles everything
     if sources == "web":
         if progress:
             progress.start_web_only()
             progress.end_web_only()
-        return reddit_items, x_items, True, raw_openai, raw_xai, raw_reddit_enriched, reddit_error, x_error
+        return reddit_items, x_items, raindrop_items, True, raw_openai, raw_xai, raw_raindrops, raw_reddit_enriched, reddit_error, x_error, raindrops_error
 
     # Determine which searches to run
     run_reddit = sources in ("both", "reddit", "all", "reddit-web")
     run_x = sources in ("both", "x", "all", "x-web")
+    run_raindrops = sources in ("all", "raindrops", "raindrops-only", "raindrops-web") and config.get("RAINDROP_API_KEY")
 
-    # Run Reddit and X searches in parallel
+    # Run Reddit, X, and Raindrops searches in parallel
     reddit_future = None
     x_future = None
+    raindrops_future = None
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        # Submit both searches
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        # Submit all searches
         if run_reddit:
             if progress:
                 progress.start_reddit()
@@ -218,6 +266,12 @@ def run_research(
                 progress.start_x()
             x_future = executor.submit(
                 _search_x, topic, config, selected_models,
+                from_date, to_date, depth, mock
+            )
+
+        if run_raindrops:
+            raindrops_future = executor.submit(
+                _search_raindrops, topic, config,
                 from_date, to_date, depth, mock
             )
 
@@ -246,6 +300,16 @@ def run_research(
             if progress:
                 progress.end_x(len(x_items))
 
+        if raindrops_future:
+            try:
+                raindrop_items, raw_raindrops, raindrops_error = raindrops_future.result()
+                if raindrops_error and progress:
+                    progress.show_error(f"Raindrops error: {raindrops_error}")
+            except Exception as e:
+                raindrops_error = f"{type(e).__name__}: {e}"
+                if progress:
+                    progress.show_error(f"Raindrops error: {e}")
+
     # Enrich Reddit items with real data (sequential, but with error handling per-item)
     if reddit_items:
         if progress:
@@ -271,7 +335,7 @@ def run_research(
         if progress:
             progress.end_reddit_enrich()
 
-    return reddit_items, x_items, web_needed, raw_openai, raw_xai, raw_reddit_enriched, reddit_error, x_error
+    return reddit_items, x_items, raindrop_items, web_needed, raw_openai, raw_xai, raw_raindrops, raw_reddit_enriched, reddit_error, x_error, raindrops_error
 
 
 def main():
@@ -288,9 +352,9 @@ def main():
     )
     parser.add_argument(
         "--sources",
-        choices=["auto", "reddit", "x", "both"],
+        choices=["auto", "reddit", "x", "both", "raindrops", "all"],
         default="auto",
-        help="Source selection",
+        help="Source selection (use 'all' for reddit+x+raindrops)",
     )
     parser.add_argument(
         "--quick",
@@ -410,7 +474,7 @@ def main():
         mode = sources
 
     # Run research
-    reddit_items, x_items, web_needed, raw_openai, raw_xai, raw_reddit_enriched, reddit_error, x_error = run_research(
+    reddit_items, x_items, raindrop_items, web_needed, raw_openai, raw_xai, raw_raindrops, raw_reddit_enriched, reddit_error, x_error, raindrops_error = run_research(
         args.topic,
         sources,
         config,
@@ -428,23 +492,29 @@ def main():
     # Normalize items
     normalized_reddit = normalize.normalize_reddit_items(reddit_items, from_date, to_date)
     normalized_x = normalize.normalize_x_items(x_items, from_date, to_date)
+    normalized_raindrops = normalize.normalize_raindrop_items(raindrop_items, from_date, to_date)
 
     # Hard date filter: exclude items with verified dates outside the range
     # This is the safety net - even if prompts let old content through, this filters it
     filtered_reddit = normalize.filter_by_date_range(normalized_reddit, from_date, to_date)
     filtered_x = normalize.filter_by_date_range(normalized_x, from_date, to_date)
+    filtered_raindrops = normalize.filter_by_date_range(normalized_raindrops, from_date, to_date)
 
     # Score items
     scored_reddit = score.score_reddit_items(filtered_reddit)
     scored_x = score.score_x_items(filtered_x)
+    scored_raindrops = score.score_raindrop_items(filtered_raindrops)
 
     # Sort items
     sorted_reddit = score.sort_items(scored_reddit)
     sorted_x = score.sort_items(scored_x)
+    sorted_raindrops = score.sort_items(scored_raindrops)
 
     # Dedupe items
     deduped_reddit = dedupe.dedupe_reddit(sorted_reddit)
     deduped_x = dedupe.dedupe_x(sorted_x)
+    # Note: Raindrops don't need deduping (they're already curated bookmarks)
+    deduped_raindrops = sorted_raindrops
 
     progress.end_processing()
 
@@ -459,8 +529,10 @@ def main():
     )
     report.reddit = deduped_reddit
     report.x = deduped_x
+    report.raindrops = deduped_raindrops
     report.reddit_error = reddit_error
     report.x_error = x_error
+    report.raindrops_error = raindrops_error
 
     # Generate context snippet
     report.context_snippet_md = render.render_context_snippet(report)
@@ -472,7 +544,7 @@ def main():
     if sources == "web":
         progress.show_web_only_complete()
     else:
-        progress.show_complete(len(deduped_reddit), len(deduped_x))
+        progress.show_complete(len(deduped_reddit), len(deduped_x), len(deduped_raindrops))
 
     # Output result
     output_result(report, args.emit, web_needed, args.topic, from_date, to_date, missing_keys)
