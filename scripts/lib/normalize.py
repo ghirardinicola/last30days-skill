@@ -4,7 +4,7 @@ from typing import Any, Dict, List, TypeVar, Union
 
 from . import dates, schema
 
-T = TypeVar("T", schema.RedditItem, schema.XItem, schema.WebSearchItem)
+T = TypeVar("T", schema.RedditItem, schema.XItem, schema.WebSearchItem, schema.RaindropItem)
 
 
 def filter_by_date_range(
@@ -148,6 +148,58 @@ def normalize_x_items(
             date=date_str,
             date_confidence=date_confidence,
             engagement=engagement,
+            relevance=item.get("relevance", 0.5),
+            why_relevant=item.get("why_relevant", ""),
+        ))
+
+    return normalized
+
+
+def normalize_raindrop_items(
+    items: List[Dict[str, Any]],
+    from_date: str,
+    to_date: str,
+) -> List[schema.RaindropItem]:
+    """Normalize raw Raindrop items to schema.
+
+    Args:
+        items: Raw Raindrop items from API
+        from_date: Start of date range
+        to_date: End of date range
+
+    Returns:
+        List of RaindropItem objects
+    """
+    normalized = []
+
+    for item in items:
+        # Extract date from ISO 8601 timestamp (created field)
+        date_str = None
+        created = item.get("created", "")
+        if created:
+            # Extract YYYY-MM-DD from ISO 8601 timestamp
+            # Format: 2026-01-15T10:30:00.000Z or 2026-01-15T10:30:00Z
+            if isinstance(created, str) and len(created) >= 10:
+                date_str = created[:10]  # Take YYYY-MM-DD part
+
+        # Raindrops have exact timestamps, so confidence is always high
+        date_confidence = "high" if date_str else "low"
+
+        normalized.append(schema.RaindropItem(
+            id=item.get("id", ""),
+            title=item.get("title", ""),
+            link=item.get("link", ""),
+            domain=item.get("domain", ""),
+            excerpt=item.get("excerpt", ""),
+            note=item.get("note", ""),
+            tags=item.get("tags", []),
+            type=item.get("type", "link"),
+            created=date_str,
+            date_confidence=date_confidence,
+            last_update=item.get("last_update", ""),
+            cover=item.get("cover", ""),
+            important=item.get("important", False),
+            collection_id=item.get("collection_id"),
             relevance=item.get("relevance", 0.5),
             why_relevant=item.get("why_relevant", ""),
         ))

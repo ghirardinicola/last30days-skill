@@ -1,6 +1,6 @@
 ---
 name: last30days
-description: Research a topic from the last 30 days on Reddit + X + Web, become an expert, and write copy-paste-ready prompts for the user's target tool.
+description: Research a topic from the last 30 days on Reddit + X + Raindrops + Web, become an expert, and write copy-paste-ready prompts for the user's target tool.
 argument-hint: "[topic] for [tool]" or "[topic]"
 context: fork
 agent: Explore
@@ -10,7 +10,7 @@ allowed-tools: Bash, Read, Write, AskUserQuestion, WebSearch
 
 # last30days: Research Any Topic from the Last 30 Days
 
-Research ANY topic across Reddit, X, and the web. Surface what people are actually discussing, recommending, and debating right now.
+Research ANY topic across Reddit, X, Raindrops (personal bookmarks), and the web. Surface what people are actually discussing, recommending, and debating right now.
 
 Use cases:
 - **Prompting**: "photorealistic people in Nano Banana Pro", "Midjourney prompts", "ChatGPT image generation" → learn techniques, get copy-paste prompts

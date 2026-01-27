@@ -170,18 +170,64 @@ class WebSearchItem:
 
 
 @dataclass
+class RaindropItem:
+    """Normalized Raindrop item (personal/public bookmark)."""
+    id: str
+    title: str
+    link: str
+    domain: str
+    excerpt: str = ""
+    note: str = ""
+    tags: List[str] = field(default_factory=list)
+    type: str = "link"  # link, article, video, document, image, audio
+    created: Optional[str] = None
+    date_confidence: str = "high"  # Raindrops have exact timestamps
+    last_update: str = ""
+    cover: str = ""
+    important: bool = False  # Marked as favorite
+    collection_id: Optional[str] = None
+    relevance: float = 0.5
+    why_relevant: str = ""
+    subs: SubScores = field(default_factory=SubScores)
+    score: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': self.id,
+            'title': self.title,
+            'link': self.link,
+            'domain': self.domain,
+            'excerpt': self.excerpt,
+            'note': self.note,
+            'tags': self.tags,
+            'type': self.type,
+            'created': self.created,
+            'date_confidence': self.date_confidence,
+            'last_update': self.last_update,
+            'cover': self.cover,
+            'important': self.important,
+            'collection_id': self.collection_id,
+            'relevance': self.relevance,
+            'why_relevant': self.why_relevant,
+            'subs': self.subs.to_dict(),
+            'score': self.score,
+        }
+
+
+@dataclass
 class Report:
     """Full research report."""
     topic: str
     range_from: str
     range_to: str
     generated_at: str
-    mode: str  # 'reddit-only', 'x-only', 'both', 'web-only', etc.
+    mode: str  # 'reddit-only', 'x-only', 'both', 'web-only', 'raindrops-only', etc.
     openai_model_used: Optional[str] = None
     xai_model_used: Optional[str] = None
     reddit: List[RedditItem] = field(default_factory=list)
     x: List[XItem] = field(default_factory=list)
     web: List[WebSearchItem] = field(default_factory=list)
+    raindrops: List[RaindropItem] = field(default_factory=list)
     best_practices: List[str] = field(default_factory=list)
     prompt_pack: List[str] = field(default_factory=list)
     context_snippet_md: str = ""
@@ -189,6 +235,7 @@ class Report:
     reddit_error: Optional[str] = None
     x_error: Optional[str] = None
     web_error: Optional[str] = None
+    raindrops_error: Optional[str] = None
     # Cache info
     from_cache: bool = False
     cache_age_hours: Optional[float] = None
@@ -207,6 +254,7 @@ class Report:
             'reddit': [r.to_dict() for r in self.reddit],
             'x': [x.to_dict() for x in self.x],
             'web': [w.to_dict() for w in self.web],
+            'raindrops': [rd.to_dict() for rd in self.raindrops],
             'best_practices': self.best_practices,
             'prompt_pack': self.prompt_pack,
             'context_snippet_md': self.context_snippet_md,
@@ -217,6 +265,8 @@ class Report:
             d['x_error'] = self.x_error
         if self.web_error:
             d['web_error'] = self.web_error
+        if self.raindrops_error:
+            d['raindrops_error'] = self.raindrops_error
         if self.from_cache:
             d['from_cache'] = self.from_cache
         if self.cache_age_hours is not None:
@@ -294,6 +344,31 @@ class Report:
                 score=w.get('score', 0),
             ))
 
+        # Reconstruct Raindrop items
+        raindrop_items = []
+        for rd in data.get('raindrops', []):
+            subs = SubScores(**rd.get('subs', {})) if rd.get('subs') else SubScores()
+            raindrop_items.append(RaindropItem(
+                id=rd['id'],
+                title=rd['title'],
+                link=rd['link'],
+                domain=rd.get('domain', ''),
+                excerpt=rd.get('excerpt', ''),
+                note=rd.get('note', ''),
+                tags=rd.get('tags', []),
+                type=rd.get('type', 'link'),
+                created=rd.get('created'),
+                date_confidence=rd.get('date_confidence', 'high'),
+                last_update=rd.get('last_update', ''),
+                cover=rd.get('cover', ''),
+                important=rd.get('important', False),
+                collection_id=rd.get('collection_id'),
+                relevance=rd.get('relevance', 0.5),
+                why_relevant=rd.get('why_relevant', ''),
+                subs=subs,
+                score=rd.get('score', 0),
+            ))
+
         return cls(
             topic=data['topic'],
             range_from=range_from,
@@ -305,12 +380,14 @@ class Report:
             reddit=reddit_items,
             x=x_items,
             web=web_items,
+            raindrops=raindrop_items,
             best_practices=data.get('best_practices', []),
             prompt_pack=data.get('prompt_pack', []),
             context_snippet_md=data.get('context_snippet_md', ''),
             reddit_error=data.get('reddit_error'),
             x_error=data.get('x_error'),
             web_error=data.get('web_error'),
+            raindrops_error=data.get('raindrops_error'),
             from_cache=data.get('from_cache', False),
             cache_age_hours=data.get('cache_age_hours'),
         )

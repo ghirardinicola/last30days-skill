@@ -40,6 +40,8 @@ def get_config() -> Dict[str, Any]:
     config = {
         'OPENAI_API_KEY': os.environ.get('OPENAI_API_KEY') or file_env.get('OPENAI_API_KEY'),
         'XAI_API_KEY': os.environ.get('XAI_API_KEY') or file_env.get('XAI_API_KEY'),
+        'RAINDROP_API_KEY': os.environ.get('RAINDROP_API_KEY') or file_env.get('RAINDROP_API_KEY'),
+        'RAINDROP_COLLECTION_ID': os.environ.get('RAINDROP_COLLECTION_ID') or file_env.get('RAINDROP_COLLECTION_ID', '0'),
         'OPENAI_MODEL_POLICY': os.environ.get('OPENAI_MODEL_POLICY') or file_env.get('OPENAI_MODEL_POLICY', 'auto'),
         'OPENAI_MODEL_PIN': os.environ.get('OPENAI_MODEL_PIN') or file_env.get('OPENAI_MODEL_PIN'),
         'XAI_MODEL_POLICY': os.environ.get('XAI_MODEL_POLICY') or file_env.get('XAI_MODEL_POLICY', 'latest'),

@@ -2,9 +2,16 @@
 
 ## Overview
 
-`last30days` is a Claude Code skill that researches a given topic across Reddit and X (Twitter) using the OpenAI Responses API and xAI Responses API respectively. It enforces a strict 30-day recency window, popularity-aware ranking, and produces actionable outputs including best practices, a prompt pack, and a reusable context snippet.
+`last30days` is a Claude Code skill that researches a given topic across Reddit, X (Twitter), Raindrop.io bookmarks, and the web using multiple APIs. It enforces a strict 30-day recency window, popularity-aware ranking, and produces actionable outputs including best practices, a prompt pack, and a reusable context snippet.
 
-The skill operates in three modes depending on available API keys: **reddit-only** (OpenAI key), **x-only** (xAI key), or **both** (full cross-validation). It uses automatic model selection to stay current with the latest models from both providers, with optional pinning for stability.
+The skill operates in multiple modes depending on available API keys:
+- **reddit-only** (OpenAI key): Reddit threads only
+- **x-only** (xAI key): X/Twitter posts only
+- **raindrops-only** (Raindrop key): Personal/public bookmarks only
+- **both** (OpenAI + xAI keys): Reddit + X cross-validation
+- **all** (all keys): Reddit + X + Raindrops + Web for comprehensive coverage
+
+It uses automatic model selection to stay current with the latest models from both providers, with optional pinning for stability.
 
 ## Architecture
 
@@ -17,9 +24,10 @@ The orchestrator (`last30days.py`) coordinates discovery, enrichment, normalizat
 - **models.py**: Auto-selection of OpenAI/xAI models with 7-day caching
 - **openai_reddit.py**: OpenAI Responses API + web_search for Reddit
 - **xai_x.py**: xAI Responses API + x_search for X
+- **raindrops_search.py**: Raindrop.io REST API for personal/public bookmarks
 - **reddit_enrich.py**: Fetch Reddit thread JSON for real engagement metrics
 - **normalize.py**: Convert raw API responses to canonical schema
-- **score.py**: Compute popularity-aware scores (relevance + recency + engagement)
+- **score.py**: Compute popularity-aware scores (relevance + recency + engagement/importance)
 - **dedupe.py**: Near-duplicate detection via text similarity
 - **render.py**: Generate markdown and JSON outputs
 - **schema.py**: Type definitions and validation
@@ -60,8 +68,22 @@ Options:
   --refresh           Bypass cache and fetch fresh data
   --mock              Use fixtures instead of real API calls
   --emit=MODE         Output mode: compact|json|md|context|path (default: compact)
-  --sources=MODE      Source selection: auto|reddit|x|both (default: auto)
+  --sources=MODE      Source selection: auto|reddit|x|both|raindrops|all (default: auto)
+  --quick             Faster research with fewer sources (8-15 items)
+  --deep              Comprehensive research with more sources (50-100 items)
 ```
+
+### Raindrop.io Setup
+
+To use Raindrops (personal bookmarks) as a source:
+
+1. Get your API token from https://app.raindrop.io/settings/integrations
+2. Add to `~/.config/last30days/.env`:
+   ```
+   RAINDROP_API_KEY=your_token_here
+   RAINDROP_COLLECTION_ID=0  # 0 = all bookmarks, or specific collection ID
+   ```
+3. Run with `--sources=raindrops` or `--sources=all`
 
 ## Output Files
 
