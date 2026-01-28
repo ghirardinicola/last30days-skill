@@ -1,0 +1,155 @@
+name: PR End-to-End Test
+
+on:
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  e2e-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Create config directory
+      run: |
+        mkdir -p ~/.config/last30days
+
+    - name: Set up environment file
+      env:
+        RAINDROP_API_KEY: ${{ secrets.RAINDROP_API_KEY }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      run: |
+        touch ~/.config/last30days/.env
+        if [ -n "$RAINDROP_API_KEY" ]; then
+          echo "RAINDROP_API_KEY=$RAINDROP_API_KEY" >> ~/.config/last30days/.env
+        fi
+        if [ -n "$OPENAI_API_KEY" ]; then
+          echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> ~/.config/last30days/.env
+        fi
+        if [ -n "$XAI_API_KEY" ]; then
+          echo "XAI_API_KEY=$XAI_API_KEY" >> ~/.config/last30days/.env
+        fi
+        echo "RAINDROP_COLLECTION_ID=0" >> ~/.config/last30days/.env
+
+    - name: Test Raindrops search (if key available)
+      if: env.RAINDROP_API_KEY != ''
+      env:
+        RAINDROP_API_KEY: ${{ secrets.RAINDROP_API_KEY }}
+      run: |
+        echo "🔍 Testing Raindrops search..."
+        python3 scripts/last30days.py "AI tools" --sources=raindrops --quick --emit=json > /tmp/raindrops-test.json
+
+        # Verify JSON output is valid
+        python3 -c "import json; data=json.load(open('/tmp/raindrops-test.json')); print(f'✓ Valid JSON with {len(data.get(\"raindrops\", []))} raindrops found')"
+
+        # Check for expected fields
+        python3 -c "
+        import json
+        data = json.load(open('/tmp/raindrops-test.json'))
+        assert 'topic' in data, 'Missing topic field'
+        assert 'raindrops' in data, 'Missing raindrops field'
+        assert 'mode' in data, 'Missing mode field'
+        assert isinstance(data['raindrops'], list), 'Raindrops should be a list'
+        print('✓ JSON structure is valid')
+        "
+
+        echo "✓ Raindrops search test passed!"
+
+    - name: Test all sources (if all keys available)
+      if: env.RAINDROP_API_KEY != '' && env.OPENAI_API_KEY != '' && env.XAI_API_KEY != ''
+      env:
+        RAINDROP_API_KEY: ${{ secrets.RAINDROP_API_KEY }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      run: |
+        echo "🔍 Testing all sources (Reddit + X + Raindrops)..."
+        python3 scripts/last30days.py "Python libraries" --sources=all --quick --emit=json > /tmp/all-sources-test.json
+
+        # Verify output
+        python3 -c "
+        import json
+        data = json.load(open('/tmp/all-sources-test.json'))
+        print(f'✓ Reddit items: {len(data.get(\"reddit\", []))}')
+        print(f'✓ X items: {len(data.get(\"x\", []))}')
+        print(f'✓ Raindrops items: {len(data.get(\"raindrops\", []))}')
+        assert data['mode'] == 'all', f'Expected mode=all, got {data[\"mode\"]}'
+        print('✓ All sources test passed!')
+        "
+
+    - name: Test auto mode (fallback when no keys)
+      if: env.RAINDROP_API_KEY == '' && env.OPENAI_API_KEY == '' && env.XAI_API_KEY == ''
+      run: |
+        echo "🔍 Testing web-only fallback mode..."
+        python3 scripts/last30days.py "test topic" --sources=auto --emit=json > /tmp/fallback-test.json
+
+        python3 -c "
+        import json
+        data = json.load(open('/tmp/fallback-test.json'))
+        print(f'✓ Mode: {data[\"mode\"]}')
+        assert data['mode'] in ['web-only', 'web'], f'Expected web mode, got {data[\"mode\"]}'
+        print('✓ Fallback mode test passed!')
+        "
+
+    - name: Test JSON emit mode
+      run: |
+        echo "🔍 Testing JSON emit mode..."
+        python3 scripts/last30days.py "test" --sources=auto --quick --emit=json > /tmp/json-test.json
+        python3 -m json.tool /tmp/json-test.json > /dev/null
+        echo "✓ JSON emit mode works!"
+
+    - name: Test compact emit mode
+      run: |
+        echo "🔍 Testing compact emit mode..."
+        output=$(python3 scripts/last30days.py "test" --sources=auto --quick --emit=compact)
+        echo "$output" | grep -q "Research Results"
+        echo "✓ Compact emit mode works!"
+
+    - name: Generate test summary
+      if: always()
+      run: |
+        echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        if [ -n "${{ secrets.RAINDROP_API_KEY }}" ]; then
+          echo "✅ Raindrop API key configured" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "⚠️ Raindrop API key not configured (tests skipped)" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
+          echo "✅ OpenAI API key configured" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "⚠️ OpenAI API key not configured (Reddit tests skipped)" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        if [ -n "${{ secrets.XAI_API_KEY }}" ]; then
+          echo "✅ xAI API key configured" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "⚠️ xAI API key not configured (X tests skipped)" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Setup Instructions" >> $GITHUB_STEP_SUMMARY
+        echo "To enable full end-to-end testing, add these secrets to your repository:" >> $GITHUB_STEP_SUMMARY
+        echo "1. Go to Settings → Secrets and variables → Actions" >> $GITHUB_STEP_SUMMARY
+        echo "2. Add the following repository secrets:" >> $GITHUB_STEP_SUMMARY
+        echo "   - \`RAINDROP_API_KEY\` - Get from https://app.raindrop.io/settings/integrations" >> $GITHUB_STEP_SUMMARY
+        echo "   - \`OPENAI_API_KEY\` (optional) - For Reddit search" >> $GITHUB_STEP_SUMMARY
+        echo "   - \`XAI_API_KEY\` (optional) - For X/Twitter search" >> $GITHUB_STEP_SUMMARY
+
+    - name: Upload test artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: /tmp/*-test.json
+        retention-days: 7
