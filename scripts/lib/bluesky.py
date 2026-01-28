@@ -14,8 +14,9 @@ def _log_error(msg: str):
     sys.stderr.flush()
 
 
-# Bluesky public API (no auth required)
-BLUESKY_PUBLIC_API = "https://public.api.bsky.app"
+# Bluesky API (no auth required for read endpoints)
+# Note: public.api.bsky.app returns 403, but api.bsky.app works
+BLUESKY_API = "https://api.bsky.app"
 SEARCH_POSTS_ENDPOINT = "/xrpc/app.bsky.feed.searchPosts"
 
 # Depth configurations: number of posts to request
@@ -60,7 +61,7 @@ def search_bluesky(
         "sort": "top",  # Sort by engagement
     }
 
-    url = f"{BLUESKY_PUBLIC_API}{SEARCH_POSTS_ENDPOINT}?{urlencode(params)}"
+    url = f"{BLUESKY_API}{SEARCH_POSTS_ENDPOINT}?{urlencode(params)}"
 
     # Timeout based on depth
     timeout = 30 if depth == "quick" else 45 if depth == "default" else 60
